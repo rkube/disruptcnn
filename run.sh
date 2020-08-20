@@ -32,7 +32,7 @@ export CUDA_LAUNCH_BLOCKING=0
 
 file="file:///gpfs/alpine/scratch/rchurchi/fus131/main_${LSB_JOBID}.txt"
 #fileprof="profile_${LSB_JOBID}_rank_${LS_JOBPID}.prof"
-source activate torch-env
+#source activate torch-env
 jsrun --nrs 6 --rs_per_host 6 --tasks_per_rs 1 --cpu_per_rs 6 --gpu_per_rs 1 \
 		   python -u disruptcnn/main.py --dist-url $file --backend 'nccl' \
                     --batch-size=12 --dropout=0.1 --clip=0.3 \

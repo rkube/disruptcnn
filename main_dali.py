@@ -20,6 +20,11 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import logging
 
+# DALI imports
+from disruptcnn.loader_dali import EceiPipeline_v01
+from nvidia.dali.plugin.pytorch import DALIGenericIterator
+
+
 parser = argparse.ArgumentParser(description='Sequence Modeling - disruption ECEi')
 #model specific
 parser.add_argument('--batch-size', type=int, default=1, metavar='N',
@@ -108,7 +113,7 @@ parser.add_argument('--plot', action='store_true',
 
 
 root = "/gpfs/wolf/proj-shared/gen141/disruptCNN/ecei_d3d/"
-data_root = root + 'data/'
+data_root = root+'data/'
 clear_file = root + 'd3d_clear_ecei.final.txt'
 disrupt_file = root + 'd3d_disrupt_ecei.final.txt'
 
@@ -285,6 +290,10 @@ def main_worker(gpu,ngpus_per_node,args):
     #be worse performance
     cudnn.benchmark = True
 
+    pipe = EceiPipeline_v01(data_iterator=train_loader, batch_size=args.batch_size, num_threads=6, device_id=0)
+    #pipe.build()
+    logging.debug(f"rank {args.rank:02d}. len(train_loader) = {len(train_loader)}")
+    dali_iter = DALIGenericIterator(pipe, output_map=["data", "target", "global_index", "weight"], size=len(train_loader))
 
     #main training loop
     steps = 0
@@ -294,7 +303,11 @@ def main_worker(gpu,ngpus_per_node,args):
         logging.debug(f"rank {args.rank:02d} - Epoch {epoch:02d} start")
         nvtx.range_push(f"Epoch {epoch:02d}")
         train_loader.sampler.set_epoch(epoch)
-        for batch_idx, (data, target, global_index, weight) in enumerate(train_loader):
+
+        for batch_idx, it in enumerate(dali_iter):
+            batch_data = it[0]
+            data, target, global_index, weight = batch_data["data"], batch_data["target"], batch_data["global_index"], batch_data["weight"]
+
             logging.debug(f"rank {args.rank:02d} - Batch {batch_idx:03d} start")
             nvtx.range_push(f"Batch {batch_idx:03d}")
             model.train()

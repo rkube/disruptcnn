@@ -7,6 +7,9 @@ from sklearn.model_selection import train_test_split
 import os
 #from torch.utils.data import SubsetRandomSampler
 from disruptcnn.sampler import StratifiedSampler
+import torch.cuda.nvtx as nvtx
+import logging
+import time
 
 class EceiDataset(data.Dataset):
     """ECEi dataset"""
@@ -16,7 +19,7 @@ class EceiDataset(data.Dataset):
                       Twarn=300,
                       test=0,test_indices=None,
                       label_balance='const',normalize=True,data_step=1,
-                      nsub=None,nrecept=None):
+                      nsub=None,nrecept=None, rank=None):
         """Initialize
         root: Directory root. Must have 'disrupt/' and 'clear/' as subdirectories
         clear_file, disrupt_file: File paths for disrupt/clear ECEi datasets.
@@ -50,6 +53,7 @@ class EceiDataset(data.Dataset):
         self.data_step = data_step
         self.nsub = nsub
         self.nrecept = nrecept
+        self.rank = rank
 
         data_disrupt = np.loadtxt(disrupt_file,skiprows=1)
         data_clear = np.loadtxt(clear_file,skiprows=1)
@@ -216,17 +220,30 @@ class EceiDataset(data.Dataset):
         return self.root+shot_type+'/'+str(self.shot[index])+'.h5'
 
     def read_data(self,index):
+        logging.basicConfig(filename="disruptcnn.log", level=logging.DEBUG, format="%(asctime)s   %(process)d %(processName)s - %(message)s")
+
+        nvtx.range_push("read_data") 
         shot_index = self.shot_idxi[index]
         filename = self.create_filename(shot_index)
+    
+        logging.debug(f"Reading {filename}")
         f = h5py.File(filename,'r')
+        tic = time.perf_counter()  
         #check if weve read in offsets yet
         if np.all(self.offsets[...,shot_index]==0):
             self.offsets[...,shot_index] = f['offsets'][...]
         #read data, remove offset
+      
         X = f['LFS'][...,self.start_idxi[index]:self.stop_idxi[index]][...,::self.data_step] - self.offsets[...,shot_index][...,np.newaxis]
+        #X = f['LFS'][...,self.start_idxi[index]:self.stop_idxi[index]:self.data_step] - self.offsets[...,shot_index][...,np.newaxis]
+        toc = time.perf_counter()
+        datasize = X.itemsize * X.size / 1024 / 1024
+        transfer_rate = datasize / (toc - tic) 
+        logging.debug(f"rank {self.rank:02d} Reading {datasize:f}MB took {toc-tic:6.4f}s - {transfer_rate} MB/s")
         if self.normalize:
             X = (X - self.normalize_mean[...,np.newaxis])/self.normalize_std[...,np.newaxis]
         f.close()
+        nvtx.range_pop()
         return X
 
 
